@@ -1,0 +1,134 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'great420yt@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+      );
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Users collection: strict RBAC, students cannot arbitrarily alter subscription or role
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isOwner(userId) && request.resource.data.uid == userId;
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (
+          isOwner(userId) && 
+          request.resource.data.uid == userId && 
+          request.resource.data.role == resource.data.role &&
+          (
+            // Normal profile update: cannot touch subscriptionStatus, subscriptionExpiresAt, or isSuspended
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscriptionStatus', 'subscriptionExpiresAt', 'isSuspended'])) ||
+            // OR verified promo activation via existing redemption record:
+            (
+              request.resource.data.subscriptionStatus == 'active' &&
+              request.resource.data.lastRedeemedPromo != null &&
+              exists(/databases/$(database)/documents/promo_redemptions/$(request.resource.data.lastRedeemedPromo + '_' + userId))
+            )
+          )
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Tests collection
+    match /tests/{testId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+
+      // Questions subcollection
+      match /questions/{questionId} {
+        allow read: if isSignedIn();
+        allow write: if isAdmin();
+      }
+    }
+
+    // Subscription Plans collection
+    match /subscription_plans/{planId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // System Settings (e.g. payment_config)
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Promo Codes collection
+    match /promo_codes/{codeId} {
+      allow read: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          // Allow student to increment usedCount by 1 upon valid redemption
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount']) &&
+          request.resource.data.usedCount == resource.data.usedCount + 1 &&
+          resource.data.usedCount < resource.data.maxRedemptions &&
+          resource.data.isActive == true
+        )
+      );
+      allow create, delete: if isAdmin();
+    }
+
+    // Promo Redemptions collection
+    match /promo_redemptions/{redemptionId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && 
+        request.resource.data.userId == request.auth.uid &&
+        redemptionId == (request.resource.data.promoId + '_' + request.auth.uid) &&
+        exists(/databases/$(database)/documents/promo_codes/$(request.resource.data.promoId)) &&
+        get(/databases/$(database)/documents/promo_codes/$(request.resource.data.promoId)).data.isActive == true &&
+        get(/databases/$(database)/documents/promo_codes/$(request.resource.data.promoId)).data.usedCount < get(/databases/$(database)/documents/promo_codes/$(request.resource.data.promoId)).data.maxRedemptions;
+      allow update, delete: if isAdmin();
+    }
+
+    // Payments collection (bKash/Nagad)
+    match /payments/{paymentId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Subscriptions collection
+    match /subscriptions/{subId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (
+          request.resource.data.userId == request.auth.uid &&
+          request.resource.data.promoCode != null &&
+          exists(/databases/$(database)/documents/promo_redemptions/$(request.resource.data.promoCode + '_' + request.auth.uid))
+        )
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    // Attempts collection
+    match /attempts/{attemptId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+  }
+}

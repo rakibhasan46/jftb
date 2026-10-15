@@ -1,0 +1,6 @@
+{
+  "name": "JFT-Basic Pro - Japanese Language Test Platform",
+  "description": "Professional subscription-based JFT-Basic Mock Test platform with Kanji furigana, underlined words, listening audio, bKash/Nagad manual payment verification, and comprehensive admin controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

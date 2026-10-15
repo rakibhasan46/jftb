@@ -1,0 +1,135 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and role",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "student"] },
+        "subscriptionStatus": { "type": "string", "enum": ["active", "pending", "expired", "none"] },
+        "subscriptionExpiresAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "role", "subscriptionStatus"]
+    },
+    "Test": {
+      "title": "Test",
+      "description": "Mock test definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "durationMinutes": { "type": "number" },
+        "passingScore": { "type": "number" },
+        "isPublished": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "durationMinutes", "passingScore", "isPublished"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Exam question with furigana and underlined text",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "testId": { "type": "string" },
+        "section": { "type": "string", "enum": ["script_vocab", "conversation", "listening", "reading"] },
+        "japaneseText": { "type": "string" },
+        "furigana": { "type": "string" },
+        "underlinedText": { "type": "string" },
+        "bengaliInstruction": { "type": "string" },
+        "bengaliExplanation": { "type": "string" },
+        "options": { "type": "array" },
+        "correctAnswer": { "type": "number" },
+        "audioUrl": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "marks": { "type": "number" }
+      },
+      "required": ["id", "testId", "section", "japaneseText", "bengaliInstruction", "correctAnswer", "marks"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "bKash / Nagad payment request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "planId": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["bkash", "nagad"] },
+        "transactionId": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string" },
+        "reviewedBy": { "type": "string" },
+        "reviewedAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "planId", "amount", "paymentMethod", "transactionId", "status", "createdAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "User subscription record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "planId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired", "cancelled"] },
+        "startDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "paymentId": { "type": "string" }
+      },
+      "required": ["id", "userId", "planId", "status", "startDate", "expiryDate"]
+    },
+    "Attempt": {
+      "title": "Attempt",
+      "description": "Student mock test attempt and results",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "testId": { "type": "string" },
+        "userId": { "type": "string" },
+        "startedAt": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "score": { "type": "number" },
+        "totalMarks": { "type": "number" },
+        "passed": { "type": "boolean" },
+        "sectionScores": { "type": "object" },
+        "answers": { "type": "object" },
+        "status": { "type": "string", "enum": ["in_progress", "submitted"] }
+      },
+      "required": ["id", "testId", "userId", "startedAt", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "User profiles"
+    },
+    "/tests/{testId}": {
+      "schema": { "$ref": "#/entities/Test" },
+      "description": "Mock tests"
+    },
+    "/tests/{testId}/questions/{questionId}": {
+      "schema": { "$ref": "#/entities/Question" },
+      "description": "Questions in a test"
+    },
+    "/payments/{paymentId}": {
+      "schema": { "$ref": "#/entities/Payment" },
+      "description": "bKash / Nagad payment requests"
+    },
+    "/subscriptions/{subId}": {
+      "schema": { "$ref": "#/entities/Subscription" },
+      "description": "User active subscriptions"
+    },
+    "/attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/Attempt" },
+      "description": "Student exam attempts and results"
+    }
+  }
+}
