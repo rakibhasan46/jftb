@@ -206,7 +206,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       const plansSnap = await getDocs(collection(db, 'subscription_plans'));
       const planList: SubscriptionPlan[] = [];
       plansSnap.forEach((d) => planList.push(d.data() as SubscriptionPlan));
-      setPlans(planList.length > 0 ? planList : DEFAULT_PLANS);
+      setPlans(planList);
 
       // 5. Fetch Subscriptions
       const subSnap = await getDocs(collection(db, 'subscriptions'));
