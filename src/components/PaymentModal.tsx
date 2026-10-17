@@ -115,11 +115,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     } catch (err: any) {
       setError(err.message || 'পেমেন্ট সাবমিট করতে সমস্যা হয়েছে।');
     } finally {
-      setLoadingFalse();
+      setSubmitting(false);
     }
   };
-
-  const setLoadingFalse = () => setSubmitting(false);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">

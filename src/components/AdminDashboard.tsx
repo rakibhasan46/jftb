@@ -64,6 +64,11 @@ import {
   ChevronDown,
   ListFilter,
   Calendar,
+  Coins,
+  Ticket,
+  RotateCcw,
+  History,
+  Clock,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -78,7 +83,7 @@ const AUDIO_PRESETS = [
 ];
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'questions' | 'results' | 'plans' | 'payments' | 'promos' | 'students' | 'notices'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'questions' | 'results' | 'subscriptions' | 'plans' | 'payments' | 'promos' | 'students' | 'notices'>('overview');
   
   // Data lists
   const [tests, setTests] = useState<TestDefinition[]>([]);
@@ -90,12 +95,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   const [promos, setPromos] = useState<PromoCode[]>([]);
   const [redemptions, setRedemptions] = useState<PromoRedemption[]>([]);
   const [notices, setNotices] = useState<NoticeItem[]>([]);
+  const [subscriptions, setSubscriptions] = useState<SubscriptionRecord[]>([]);
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig>(DEFAULT_PAYMENT_CONFIG);
   const [selectedTestId, setSelectedTestId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   // Search in students
   const [studentSearch, setStudentSearch] = useState('');
+
+  // Subscriptions Tab State
+  const [subFilter, setSubFilter] = useState<'all' | 'active' | 'expired' | 'cancelled'>('all');
+  const [subSearch, setSubSearch] = useState('');
+  const [subGrantStudentId, setSubGrantStudentId] = useState('');
+  const [subGrantPlanId, setSubGrantPlanId] = useState('plan_1_month');
+  const [subGrantDays, setSubGrantDays] = useState(30);
 
   // Result Panel State
   const [resultSearch, setResultSearch] = useState('');
@@ -163,7 +176,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      await seedDefaultTestData();
+      await seedDefaultTestData(true);
 
       // 1. Fetch Tests
       const testsSnap = await getDocs(collection(db, 'tests'));
@@ -183,7 +196,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       // 3. Fetch Students
       const userSnap = await getDocs(collection(db, 'users'));
       const userList: UserProfile[] = [];
-      userSnap.forEach((d) => userList.push(d.data() as UserProfile));
+      userSnap.forEach((d) => {
+        const u = d.data() as UserProfile;
+        userList.push(u);
+      });
       setStudents(userList);
 
       // 4. Fetch Plans
@@ -192,7 +208,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       plansSnap.forEach((d) => planList.push(d.data() as SubscriptionPlan));
       setPlans(planList.length > 0 ? planList : DEFAULT_PLANS);
 
-      // 5. Fetch Promos & Redemptions
+      // 5. Fetch Subscriptions
+      const subSnap = await getDocs(collection(db, 'subscriptions'));
+      const subList: SubscriptionRecord[] = [];
+      subSnap.forEach((d) => subList.push(d.data() as SubscriptionRecord));
+      subList.sort((a, b) => new Date(b.createdAt || b.startDate).getTime() - new Date(a.createdAt || a.startDate).getTime());
+      setSubscriptions(subList);
+
+      // 6. Fetch Promos & Redemptions
       const promoSnap = await getDocs(collection(db, 'promo_codes'));
       const promoList: PromoCode[] = [];
       promoSnap.forEach((d) => promoList.push(d.data() as PromoCode));
@@ -203,7 +226,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
       redSnap.forEach((d) => redList.push(d.data() as PromoRedemption));
       setRedemptions(redList);
 
-      // 6. Fetch Payment Config
+      // 9. Fetch Payment Config
       const payConfigSnap = await getDoc(doc(db, 'settings', 'payment_config'));
       if (payConfigSnap.exists()) {
         const conf = payConfigSnap.data() as PaymentConfig;
@@ -221,14 +244,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         setConfigInstructions(DEFAULT_PAYMENT_CONFIG.instructionsBengali);
       }
 
-      // 7. Fetch Notices
+      // 10. Fetch Notices
       const noticeSnap = await getDocs(collection(db, 'notices'));
       const noticeList: NoticeItem[] = [];
       noticeSnap.forEach((d) => noticeList.push(d.data() as NoticeItem));
       noticeList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setNotices(noticeList);
 
-      // 8. Fetch Exam Attempts
+      // 11. Fetch Exam Attempts
       const attemptsSnap = await getDocs(collection(db, 'attempts'));
       const attemptList: AttemptRecord[] = [];
       attemptsSnap.forEach((d) => attemptList.push(d.data() as AttemptRecord));
@@ -706,6 +729,130 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     }
   };
 
+  // Subscription Actions
+  const handleCancelSubscription = async (sub: SubscriptionRecord) => {
+    if (!confirm(`আপনি কি এই শিক্ষার্থীর সাবস্ক্রিপশন বাতিল করতে চান?`)) return;
+    try {
+      await updateDoc(doc(db, 'subscriptions', sub.id), {
+        status: 'cancelled',
+        updatedAt: new Date().toISOString(),
+      });
+
+      await updateDoc(doc(db, 'users', sub.userId), {
+        subscriptionStatus: 'none',
+      });
+
+      fetchAllData();
+      alert('সাবস্ক্রিপশন সফলভাবে বাতিল করা হয়েছে।');
+    } catch (err: any) {
+      console.error('Error cancelling subscription:', err);
+      alert('সাবস্ক্রিপশন বাতিলের সময় সমস্যা হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleExtendSubscription = async (sub: SubscriptionRecord) => {
+    const daysStr = prompt('কত দিন বৃদ্ধি করতে চান?', '30');
+    if (!daysStr) return;
+    const days = parseInt(daysStr, 10);
+    if (isNaN(days) || days <= 0) return;
+
+    try {
+      const baseDate = sub.expiryDate && new Date(sub.expiryDate) > new Date() ? new Date(sub.expiryDate) : new Date();
+      const newExpiry = new Date(baseDate.getTime() + days * 24 * 60 * 60 * 1000);
+
+      await updateDoc(doc(db, 'subscriptions', sub.id), {
+        status: 'active',
+        expiryDate: newExpiry.toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await updateDoc(doc(db, 'users', sub.userId), {
+        subscriptionStatus: 'active',
+        subscriptionExpiresAt: newExpiry.toISOString(),
+      });
+
+      fetchAllData();
+      alert(`সাবস্ক্রিপশন সফলভাবে ${days} দিন বৃদ্ধি করা হয়েছে!`);
+    } catch (err: any) {
+      console.error('Error extending subscription:', err);
+      alert('সাবস্ক্রিপশন বৃদ্ধির সময় সমস্যা হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleReactivateSubscription = async (sub: SubscriptionRecord) => {
+    const daysStr = prompt('কত দিনের জন্য পুনরায় সক্রিয় করতে চান?', '30');
+    if (!daysStr) return;
+    const days = parseInt(daysStr, 10);
+    if (isNaN(days) || days <= 0) return;
+
+    try {
+      const newExpiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+
+      await updateDoc(doc(db, 'subscriptions', sub.id), {
+        status: 'active',
+        startDate: new Date().toISOString(),
+        expiryDate: newExpiry.toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
+      await updateDoc(doc(db, 'users', sub.userId), {
+        subscriptionStatus: 'active',
+        subscriptionExpiresAt: newExpiry.toISOString(),
+      });
+
+      fetchAllData();
+      alert(`সাবস্ক্রিপশন পুনরায় সক্রিয় করা হয়েছে!`);
+    } catch (err: any) {
+      console.error('Error reactivating sub:', err);
+      alert('সক্রিয় করতে ব্যর্থ: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleCreateManualSubscriptionFromTab = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subGrantStudentId) {
+      alert('অনুগ্রহ করে একজন শিক্ষার্থী নির্বাচন করুন।');
+      return;
+    }
+    const student = students.find((s) => s.uid === subGrantStudentId);
+    if (!student) return;
+
+    const days = Number(subGrantDays) || 30;
+    const planObj = plans.find((p) => p.id === subGrantPlanId);
+
+    try {
+      const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+      const subId = 'sub_admin_' + Date.now();
+
+      const subRecord: SubscriptionRecord = {
+        id: subId,
+        userId: student.uid,
+        userEmail: student.email,
+        userName: student.displayName,
+        planId: subGrantPlanId,
+        planTitle: planObj?.title || `${days} Days Pro Pack`,
+        status: 'active',
+        startDate: new Date().toISOString(),
+        expiryDate: expiry.toISOString(),
+        grantedBy: currentUser.email,
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(doc(db, 'subscriptions', subId), subRecord);
+
+      await updateDoc(doc(db, 'users', student.uid), {
+        subscriptionStatus: 'active',
+        subscriptionExpiresAt: expiry.toISOString(),
+      });
+
+      fetchAllData();
+      alert(`শিক্ষার্থী ${student.displayName || student.email}-কে ${days} দিনের সাবস্ক্রিপশন সফলভাবে দেওয়া হয়েছে!`);
+      setSubGrantStudentId('');
+    } catch (err: any) {
+      console.error('Error creating sub:', err);
+      alert('সাবস্ক্রিপশন তৈরিতে সমস্যা হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
   // Payment Verification Actions
   const handleApprovePayment = async (payment: PaymentRecord) => {
     try {
@@ -908,6 +1055,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           }`}
         >
           প্রশ্ন ও ফুরিগানা এডিটর
+        </button>
+
+        <button
+          onClick={() => setActiveTab('subscriptions')}
+          className={`pb-3 transition border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
+            activeTab === 'subscriptions' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Calendar size={15} />
+          <span>সাবস্ক্রিপশন তালিকা ({subscriptions.length})</span>
         </button>
         <button
           onClick={() => setActiveTab('plans')}
@@ -1611,6 +1768,263 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         </div>
       )}
 
+      {/* TAB: SUBSCRIPTIONS MANAGEMENT */}
+      {activeTab === 'subscriptions' && (
+        <div className="space-y-6">
+          {/* Subscriptions Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 text-xs font-bold uppercase">মোট সাবস্ক্রিপশন</div>
+                <div className="text-2xl font-black text-slate-900 mt-1">{subscriptions.length}</div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                <Calendar size={20} />
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 text-xs font-bold uppercase">সক্রিয় সাবস্ক্রিপশন</div>
+                <div className="text-2xl font-black text-emerald-600 mt-1">
+                  {subscriptions.filter((s) => s.status === 'active' && new Date(s.expiryDate) > new Date()).length}
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <CheckCircle2 size={20} />
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 text-xs font-bold uppercase">মেয়াদোত্তীর্ণ</div>
+                <div className="text-2xl font-black text-amber-600 mt-1">
+                  {subscriptions.filter((s) => s.status === 'expired' || (s.status === 'active' && new Date(s.expiryDate) <= new Date())).length}
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                <Clock size={20} />
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <div className="text-slate-500 text-xs font-bold uppercase">বাতিলকৃত</div>
+                <div className="text-2xl font-black text-red-600 mt-1">
+                  {subscriptions.filter((s) => s.status === 'cancelled').length}
+                </div>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center">
+                <Ban size={20} />
+              </div>
+            </div>
+          </div>
+
+          {/* Create / Grant Subscription Manually */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Plus size={18} className="text-indigo-600" /> নতুন সাবস্ক্রিপশন তৈরি ও অনুমোদন করুন
+            </h3>
+            <form onSubmit={handleCreateManualSubscriptionFromTab} className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">শিক্ষার্থী নির্বাচন *</label>
+                <select
+                  required
+                  value={subGrantStudentId}
+                  onChange={(e) => setSubGrantStudentId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium"
+                >
+                  <option value="">-- শিক্ষার্থী বেছে নিন --</option>
+                  {students.map((s) => (
+                    <option key={s.uid} value={s.uid}>
+                      {s.displayName || 'No Name'} ({s.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">প্ল্যান / প্যাকেজ</label>
+                <select
+                  value={subGrantPlanId}
+                  onChange={(e) => {
+                    setSubGrantPlanId(e.target.value);
+                    const selected = plans.find((p) => p.id === e.target.value);
+                    if (selected) setSubGrantDays(selected.durationDays);
+                  }}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                >
+                  {plans.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title} ({p.durationDays} দিন)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">মেয়াদ (দিন) *</label>
+                <input
+                  type="number"
+                  min={1}
+                  required
+                  value={subGrantDays}
+                  onChange={(e) => setSubGrantDays(Number(e.target.value))}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                />
+              </div>
+
+              <div>
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 size={14} /> সাবস্ক্রিপশন সক্রিয় করুন
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {/* Subscriptions List */}
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-bold text-slate-900">সকল সাবস্ক্রিপশন ({subscriptions.length})</h3>
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-xl text-xs">
+                  {(['all', 'active', 'expired', 'cancelled'] as const).map((st) => (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setSubFilter(st)}
+                      className={`px-3 py-1 rounded-lg font-bold transition ${
+                        subFilter === st ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {st === 'all' ? 'সকল' : st === 'active' ? 'সক্রিয়' : st === 'expired' ? 'মেয়াদোত্তীর্ণ' : 'বাতিল'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search size={14} className="absolute left-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  value={subSearch}
+                  onChange={(e) => setSubSearch(e.target.value)}
+                  placeholder="ইমেইল বা নাম দিয়ে খুঁজুন..."
+                  className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                />
+              </div>
+            </div>
+
+            {subscriptions.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">কোনো সাবস্ক্রিপশন পাওয়া যায়নি।</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
+                      <th className="p-3">শিক্ষার্থী</th>
+                      <th className="p-3">প্ল্যান / প্যাকেজ</th>
+                      <th className="p-3">শুরু তারিখ</th>
+                      <th className="p-3">মেয়াদ শেষ</th>
+                      <th className="p-3">অবস্থা</th>
+                      <th className="p-3">অনুমোদনকারী</th>
+                      <th className="p-3 text-right">পদক্ষেপ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {subscriptions
+                      .filter((s) => {
+                        const isExpiredNow = new Date(s.expiryDate) <= new Date();
+                        const matchesFilter =
+                          subFilter === 'all' ||
+                          (subFilter === 'active' && s.status === 'active' && !isExpiredNow) ||
+                          (subFilter === 'expired' && (s.status === 'expired' || (s.status === 'active' && isExpiredNow))) ||
+                          (subFilter === 'cancelled' && s.status === 'cancelled');
+                        const matchesSearch =
+                          (s.userEmail && s.userEmail.toLowerCase().includes(subSearch.toLowerCase())) ||
+                          (s.userName && s.userName.toLowerCase().includes(subSearch.toLowerCase()));
+                        return matchesFilter && matchesSearch;
+                      })
+                      .map((sub) => {
+                        const isExpiredNow = new Date(sub.expiryDate) <= new Date();
+                        const isCurrentlyActive = sub.status === 'active' && !isExpiredNow;
+
+                        return (
+                          <tr key={sub.id} className="hover:bg-slate-50/50">
+                            <td className="p-3">
+                              <div className="font-bold text-slate-900">{sub.userName || 'Student'}</div>
+                              <div className="text-[11px] font-mono text-slate-500">{sub.userEmail}</div>
+                            </td>
+                            <td className="p-3 font-semibold text-slate-800">
+                              {sub.planTitle || plans.find((p) => p.id === sub.planId)?.title || sub.planId}
+                            </td>
+                            <td className="p-3 text-slate-500 whitespace-nowrap">
+                              {new Date(sub.startDate).toLocaleDateString('bn-BD')}
+                            </td>
+                            <td className="p-3 font-medium text-slate-700 whitespace-nowrap">
+                              {new Date(sub.expiryDate).toLocaleDateString('bn-BD')}
+                            </td>
+                            <td className="p-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  sub.status === 'cancelled'
+                                    ? 'bg-red-100 text-red-800'
+                                    : isCurrentlyActive
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-amber-100 text-amber-800'
+                                }`}
+                              >
+                                {sub.status === 'cancelled'
+                                  ? 'বাতিলকৃত'
+                                  : isCurrentlyActive
+                                  ? 'সক্রিয়'
+                                  : 'মেয়াদোত্তীর্ণ'}
+                              </span>
+                            </td>
+                            <td className="p-3 text-[11px] text-slate-500">
+                              {sub.grantedBy || sub.paymentId || 'Online Payment'}
+                            </td>
+                            <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleExtendSubscription(sub)}
+                                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg transition"
+                                title="মেয়াদ বাড়ান"
+                              >
+                                + মেয়াদ বৃদ্ধি
+                              </button>
+                              {sub.status === 'active' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCancelSubscription(sub)}
+                                  className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-lg transition"
+                                >
+                                  বাতিল করুন
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleReactivateSubscription(sub)}
+                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg transition"
+                                >
+                                  পুনরায় সক্রিয়
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* TAB 4: SUBSCRIPTION PLANS */}
       {activeTab === 'plans' && (
         <div className="space-y-6">
@@ -2053,7 +2467,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                   <Award className="text-amber-500" /> শিক্ষার্থীদের পরীক্ষার ফলাফল ও ক্যাটাগরিভিত্তিক স্কোর ({attempts.length})
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  অ্যাডমিন এখান থেকে যেকোনো শিক্ষার্থীর ক্যাটাগরিভিত্তিক সঠিক উত্তর ও প্রাপ্ত নম্বর দেখতে এবং প্রফেশনাল PDF রিপোর্ট ডাউনলোড করতে পারবেন।
+                  শিক্ষার্থীদের পরীক্ষার ফলাফল, নাম, পরীক্ষার নাম, মোট প্রাপ্ত নম্বর এবং ক্যাটাগরিভিত্তিক নম্বর ও শতাংশ। প্রয়োজন অনুযায়ী স্ক্রিনশট নিতে পারবেন।
                 </p>
               </div>
 

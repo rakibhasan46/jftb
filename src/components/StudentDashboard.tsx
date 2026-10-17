@@ -125,7 +125,6 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       paySnap.forEach((d) => {
         payList.push(d.data() as PaymentRecord);
       });
-      // Sort payments descending by date
       payList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setUserPayments(payList);
 
@@ -143,6 +142,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       });
       noticeList.sort((a, b) => new Date(b.publishedAt || b.createdAt).getTime() - new Date(a.publishedAt || a.createdAt).getTime());
       setNotices(noticeList);
+
+      // 6. Refresh user profile from Firestore to ensure subscription is strictly up to date
+      const userDocRef = doc(db, 'users', user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+      if (userDocSnap.exists()) {
+        const freshProfile = userDocSnap.data() as UserProfile;
+        setCurrentStudent(freshProfile);
+      }
     } catch (err) {
       console.error('Error fetching student data:', err);
     } finally {
@@ -304,11 +311,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   };
 
   const handleStartExamClick = (test: TestDefinition) => {
-    if (!hasActiveAccess) {
-      alert('পরীক্ষায় অংশগ্রহণ করার জন্য আপনার একটি সক্রিয় সাবস্ক্রিপশন প্রয়োজন। অনুগ্রহ করে নিচের প্ল্যানগুলো থেকে বিকাশ/নগদে সাবস্ক্রিপশন নিন অথবা প্রোমো কোড ব্যবহার করুন।');
+    if (hasActiveAccess) {
+      onStartExam(test);
       return;
     }
-    onStartExam(test);
+    alert('এই পরীক্ষায় অংশ নিতে একটি সক্রিয় সাবস্ক্রিপশন প্রয়োজন। অনুগ্রহ করে নিচের প্যাকেজ থেকে বিকাশ/নগদে সাবস্ক্রিপশন নিন অথবা ফ্রি প্রোমো কোড ব্যবহার করুন।');
   };
 
   return (
@@ -422,8 +429,8 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
           <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full md:w-auto">
             {hasActiveAccess ? (
-              <span className="px-4 py-2.5 bg-emerald-500/20 text-emerald-300 text-xs font-bold rounded-xl border border-emerald-400/30 flex items-center gap-2">
-                <CheckCircle size={15} /> আনলিমিটেড টেস্ট অ্যাক্সেস সক্রিয়
+              <span className="px-4 py-2.5 bg-emerald-500/20 text-emerald-300 text-xs font-bold rounded-xl border border-emerald-400/30 flex items-center gap-2 w-full sm:w-auto justify-center">
+                <CheckCircle size={15} /> আনলিমিটেড টেস্ট সক্রিয়
               </span>
             ) : (
               <a
@@ -437,17 +444,22 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       </div>
 
-      {/* 4. Promo Code Box */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Gift className="text-indigo-600" size={20} />
-            <h3 className="text-base font-bold text-slate-900">প্রোমো কোড (Promo Code)</h3>
+      {/* 4. Promo Code Card */}
+      <div className="max-w-xl bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-3">
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Gift className="text-indigo-600" size={20} />
+              <h3 className="text-base font-bold text-slate-900">প্রোমো কোড (Promo Code)</h3>
+            </div>
+            <span className="text-xs text-slate-500">ডিসকাউন্ট বা ফ্রি অ্যাক্সেস</span>
           </div>
-          <span className="text-xs text-slate-500 hidden sm:inline">স্পেশাল ডিসকাউন্ট বা ফ্রি সাবস্ক্রিপশন পান</span>
+          <p className="text-xs text-slate-500">
+            ফ্রি ট্রায়াল অ্যাক্সেস পেতে অথবা সাবস্ক্রিপশন কেনার জন্য ডিসকাউন্ট কুপন প্রয়োগ করুন।
+          </p>
         </div>
 
-        <form onSubmit={handleRedeemPromo} className="flex flex-col sm:flex-row gap-3">
+        <form onSubmit={handleRedeemPromo} className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400">
               <Tag size={16} />
@@ -457,15 +469,15 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               value={promoInput}
               onChange={(e) => setPromoInput(e.target.value)}
               placeholder="যেমন: JFTFREE7"
-              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono uppercase focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono uppercase font-bold focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
           <button
             type="submit"
             disabled={promoLoading || !promoInput.trim()}
-            className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition"
+            className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition cursor-pointer shrink-0"
           >
-            {promoLoading ? 'যাচাই হচ্ছে...' : 'কোড প্রয়োগ করুন'}
+            {promoLoading ? 'যাচাই হচ্ছে...' : 'কোড প্রয়োগ'}
           </button>
         </form>
 
@@ -537,10 +549,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                   <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
                     <button
                       onClick={() => handleStartExamClick(test)}
-                      className={`w-full py-2.5 px-4 font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 ${
+                      className={`w-full py-2.5 px-4 font-bold text-xs rounded-xl shadow-xs transition flex items-center justify-center gap-2 cursor-pointer ${
                         hasActiveAccess
                           ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
-                          : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                          : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
                       }`}
                     >
                       {hasActiveAccess ? (
@@ -551,7 +563,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
                       ) : (
                         <>
                           <ShieldAlert size={14} className="text-amber-600" />
-                          <span>সাবস্ক্রিপশন প্রয়োজন (Locked)</span>
+                          <span>সাবস্ক্রিপশন প্রয়োজন (Subscription Required)</span>
                         </>
                       )}
                     </button>

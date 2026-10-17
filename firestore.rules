@@ -136,6 +136,39 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // Tokens collection (mock test credits & vouchers)
+    match /tokens/{tokenId} {
+      allow read: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['usedCount']) &&
+          request.resource.data.usedCount == resource.data.usedCount + 1 &&
+          resource.data.usedCount < resource.data.maxRedemptions &&
+          resource.data.isActive == true
+        )
+      );
+      allow create, delete: if isAdmin();
+    }
+
+    // Token Redemptions collection (prevent duplicate token use)
+    match /token_redemptions/{redemptionId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && 
+        request.resource.data.userId == request.auth.uid &&
+        exists(/databases/$(database)/documents/tokens/$(request.resource.data.tokenId)) &&
+        get(/databases/$(database)/documents/tokens/$(request.resource.data.tokenId)).data.isActive == true &&
+        get(/databases/$(database)/documents/tokens/$(request.resource.data.tokenId)).data.usedCount < get(/databases/$(database)/documents/tokens/$(request.resource.data.tokenId)).data.maxRedemptions;
+      allow update, delete: if isAdmin();
+    }
+
+    // Token transactions ledger (credit/debit history)
+    match /token_transactions/{txId} {
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn() && (isAdmin() || request.resource.data.userId == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
     // Attempts collection
     match /attempts/{attemptId} {
       allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);

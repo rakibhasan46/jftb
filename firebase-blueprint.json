@@ -12,6 +12,7 @@
         "subscriptionStatus": { "type": "string", "enum": ["active", "pending", "expired", "none"] },
         "subscriptionExpiresAt": { "type": "string" },
         "lastRedeemedPromo": { "type": "string" },
+        "tokenBalance": { "type": "number" },
         "isSuspended": { "type": "boolean" },
         "createdAt": { "type": "string" }
       },
@@ -161,6 +162,43 @@
         "status": { "type": "string", "enum": ["in_progress", "submitted"] }
       },
       "required": ["id", "testId", "userId", "startedAt", "status"]
+    },
+    "Token": {
+      "title": "Token",
+      "description": "Mock test credit token voucher definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "tokenCount": { "type": "number" },
+        "description": { "type": "string" },
+        "maxRedemptions": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "assignedStudentEmail": { "type": "string" },
+        "assignedStudentId": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "code", "tokenCount", "maxRedemptions", "usedCount", "isActive", "createdAt"]
+    },
+    "TokenTransaction": {
+      "title": "TokenTransaction",
+      "description": "Student token balance transaction history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "type": { "type": "string", "enum": ["credit", "debit"] },
+        "amount": { "type": "number" },
+        "balanceAfter": { "type": "number" },
+        "reason": { "type": "string" },
+        "referenceId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "type", "amount", "balanceAfter", "reason", "createdAt"]
     }
   },
   "firestore": {
@@ -191,6 +229,18 @@
     "/promo_codes/{codeId}": {
       "schema": { "$ref": "#/entities/PromoCode" },
       "description": "Promo codes and free trial vouchers"
+    },
+    "/tokens/{tokenId}": {
+      "schema": { "$ref": "#/entities/Token" },
+      "description": "Exam credit tokens and vouchers"
+    },
+    "/token_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/TokenTransaction" },
+      "description": "Student token credit/debit transaction ledger"
+    },
+    "/token_redemptions/{redemptionId}": {
+      "schema": { "$ref": "#/entities/Token" },
+      "description": "Record of token code redemptions to prevent reuse"
     },
     "/subscriptions/{subId}": {
       "schema": { "$ref": "#/entities/Subscription" },

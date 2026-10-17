@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, getDocFromServer } from 'firebase/firestore';
+import { doc, getDoc, getDocFromServer, setDoc } from 'firebase/firestore';
 import { UserProfile, TestDefinition, AttemptRecord } from './types';
 import { Navbar } from './components/Navbar';
 import { AuthModal } from './components/AuthModal';
@@ -68,6 +68,11 @@ export default function App() {
               emailVerified: fbUser.emailVerified,
               createdAt: new Date().toISOString(),
             };
+            try {
+              await setDoc(userRef, defaultProfile);
+            } catch (saveErr) {
+              console.error('Error auto-creating user profile doc:', saveErr);
+            }
             setUser(defaultProfile);
             if (defaultProfile.role === 'admin') {
               seedDefaultTestData(true);

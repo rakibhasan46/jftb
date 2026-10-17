@@ -129,7 +129,9 @@ export interface SubscriptionRecord {
   id: string;
   userId: string;
   userEmail?: string;
+  userName?: string;
   planId: string;
+  planTitle?: string;
   status: 'active' | 'expired' | 'cancelled';
   startDate: string;
   expiryDate: string;
@@ -137,6 +139,7 @@ export interface SubscriptionRecord {
   promoCode?: string;
   grantedBy?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface CategoryScore {
