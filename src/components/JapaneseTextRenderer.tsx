@@ -4,12 +4,14 @@ interface JapaneseTextRendererProps {
   text: string;
   underlinedText?: string;
   className?: string;
+  showFurigana?: boolean;
 }
 
 export const JapaneseTextRenderer: React.FC<JapaneseTextRendererProps> = ({
   text,
   underlinedText,
   className = '',
+  showFurigana = true,
 }) => {
   if (!text) return null;
 
@@ -69,14 +71,18 @@ export const JapaneseTextRenderer: React.FC<JapaneseTextRendererProps> = ({
         }
         const kanji = rMatch[1];
         const rt = rMatch[2];
-        parts.push(
-          <ruby key={`ruby-${sIdx}-${rMatch.index}`} className="mx-0.5 inline-block text-center align-baseline">
-            {kanji}
-            <rt className="text-[10px] text-indigo-700 font-medium select-none block leading-none mb-0.5">
-              {rt}
-            </rt>
-          </ruby>
-        );
+        if (!showFurigana) {
+          parts.push(kanji);
+        } else {
+          parts.push(
+            <ruby key={`ruby-${sIdx}-${rMatch.index}`} className="mx-0.5 inline-block text-center align-baseline">
+              {kanji}
+              <rt className="text-[10px] text-indigo-700 dark:text-indigo-400 font-medium select-none block leading-none mb-0.5">
+                {rt}
+              </rt>
+            </ruby>
+          );
+        }
         rLastIdx = rubyRegex.lastIndex;
       }
       if (rLastIdx < str.length) {

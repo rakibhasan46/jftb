@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   updateProfile,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -68,11 +69,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
           displayName: fbUser.displayName || cleanEmail.split('@')[0],
           role: isAdminEmail ? 'admin' : 'student',
           subscriptionStatus: isAdminEmail ? 'active' : 'none',
+          emailVerified: fbUser.emailVerified,
           createdAt: new Date().toISOString(),
         };
         await setDoc(userRef, profile);
       } else {
         profile = userSnap.data() as UserProfile;
+        profile.emailVerified = fbUser.emailVerified;
         if (isAdminEmail && profile.role !== 'admin') {
           profile.role = 'admin';
           profile.subscriptionStatus = 'active';
@@ -130,6 +133,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
       const fbUser = userCredential.user;
       await updateProfile(fbUser, { displayName: displayName.trim() });
 
+      // Send verification email
+      try {
+        await sendEmailVerification(fbUser);
+      } catch (verErr) {
+        console.warn('Email verification send notice:', verErr);
+      }
+
       const isAdminEmail = cleanEmail === 'great420yt@gmail.com';
       const newProfile: UserProfile = {
         uid: fbUser.uid,
@@ -137,6 +147,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
         displayName: displayName.trim(),
         role: isAdminEmail ? 'admin' : 'student',
         subscriptionStatus: isAdminEmail ? 'active' : 'none', // Account registration is NOT subscription activation
+        emailVerified: fbUser.emailVerified,
         isSuspended: false,
         createdAt: new Date().toISOString(),
       };
@@ -206,7 +217,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onLoginSu
             </span>
           </div>
           <h2 className="text-xl font-bold">
-            {mode === 'login' && 'স্টুডেন্ট / অ্যাডমিন লগইন'}
+            {mode === 'login' && 'লগইন করুন (Sign In)'}
             {mode === 'register' && 'নতুন শিক্ষার্থী নিবন্ধন (Register)'}
             {mode === 'forgot_password' && 'পাসওয়ার্ড রিসেট'}
           </h2>

@@ -11,6 +11,8 @@
         "role": { "type": "string", "enum": ["admin", "student"] },
         "subscriptionStatus": { "type": "string", "enum": ["active", "pending", "expired", "none"] },
         "subscriptionExpiresAt": { "type": "string" },
+        "lastRedeemedPromo": { "type": "string" },
+        "isSuspended": { "type": "boolean" },
         "createdAt": { "type": "string" }
       },
       "required": ["uid", "email", "role", "subscriptionStatus"]
@@ -39,6 +41,7 @@
         "testId": { "type": "string" },
         "section": { "type": "string", "enum": ["script_vocab", "conversation", "listening", "reading"] },
         "japaneseText": { "type": "string" },
+        "contextPassage": { "type": "string" },
         "furigana": { "type": "string" },
         "underlinedText": { "type": "string" },
         "bengaliInstruction": { "type": "string" },
@@ -64,7 +67,9 @@
         "amount": { "type": "number" },
         "paymentMethod": { "type": "string", "enum": ["bkash", "nagad"] },
         "transactionId": { "type": "string" },
+        "senderPhone": { "type": "string" },
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "rejectionReason": { "type": "string" },
         "createdAt": { "type": "string" },
         "reviewedBy": { "type": "string" },
         "reviewedAt": { "type": "string" }
@@ -78,13 +83,65 @@
       "properties": {
         "id": { "type": "string" },
         "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
         "planId": { "type": "string" },
         "status": { "type": "string", "enum": ["active", "expired", "cancelled"] },
         "startDate": { "type": "string" },
         "expiryDate": { "type": "string" },
-        "paymentId": { "type": "string" }
+        "paymentId": { "type": "string" },
+        "promoCode": { "type": "string" },
+        "grantedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
       },
       "required": ["id", "userId", "planId", "status", "startDate", "expiryDate"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Platform announcement and notices",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "isPublished": { "type": "boolean" },
+        "publishedAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "priority": { "type": "string", "enum": ["normal", "important", "urgent"] },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "title", "message", "isPublished", "publishedAt"]
+    },
+    "UsedTransaction": {
+      "title": "UsedTransaction",
+      "description": "Unique transaction record to prevent duplicate submissions",
+      "type": "object",
+      "properties": {
+        "transactionId": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["transactionId", "userId", "createdAt"]
+    },
+    "PromoCode": {
+      "title": "PromoCode",
+      "description": "Promotional code definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "benefitType": { "type": "string", "enum": ["free_access", "discount"] },
+        "freeDurationDays": { "type": "number" },
+        "discountType": { "type": "string", "enum": ["percentage", "fixed"] },
+        "discountValue": { "type": "number" },
+        "maxRedemptions": { "type": "number" },
+        "usedCount": { "type": "number" },
+        "startDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "code", "benefitType", "maxRedemptions", "usedCount", "startDate", "expiryDate", "isActive"]
     },
     "Attempt": {
       "title": "Attempt",
@@ -122,6 +179,18 @@
     "/payments/{paymentId}": {
       "schema": { "$ref": "#/entities/Payment" },
       "description": "bKash / Nagad payment requests"
+    },
+    "/used_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/UsedTransaction" },
+      "description": "Transaction ID uniqueness tracking"
+    },
+    "/notices/{noticeId}": {
+      "schema": { "$ref": "#/entities/Notice" },
+      "description": "Notices and system announcements"
+    },
+    "/promo_codes/{codeId}": {
+      "schema": { "$ref": "#/entities/PromoCode" },
+      "description": "Promo codes and free trial vouchers"
     },
     "/subscriptions/{subId}": {
       "schema": { "$ref": "#/entities/Subscription" },

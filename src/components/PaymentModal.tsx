@@ -75,10 +75,10 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
     setSubmitting(true);
 
     try {
-      // Check for duplicate transaction ID
-      const dupQuery = query(collection(db, 'payments'), where('transactionId', '==', cleanTxId));
-      const dupSnap = await getDocs(dupQuery);
-      if (!dupSnap.empty) {
+      // Check for duplicate transaction ID via dedicated used_transactions collection
+      const txRef = doc(db, 'used_transactions', cleanTxId);
+      const txSnap = await getDoc(txRef);
+      if (txSnap.exists()) {
         throw new Error('এই ট্রানজেকশন আইডি (TrxID) ইতিমধ্যে একবার জমা দেওয়া হয়েছে। অনুগ্রহ করে সঠিক ও নতুন TrxID দিন।');
       }
 
@@ -97,6 +97,14 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         createdAt: new Date().toISOString(),
       };
 
+      // Record transaction to prevent duplicate submissions
+      await setDoc(txRef, {
+        transactionId: cleanTxId,
+        userId: user.uid,
+        createdAt: new Date().toISOString(),
+      });
+
+      // Submit payment request
       await setDoc(doc(db, 'payments', paymentId), paymentRecord);
 
       setSuccess(true);
@@ -242,7 +250,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
             <button
               type="submit"
               disabled={submitting}
-              className="w-full py-3 bg-pink-600 hover:bg-pink-700 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-3 bg-pink-600 hover:bg-pink-700 text-white font-bold text-sm rounded-xl shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer"
             >
               <Send size={16} />
               {submitting ? 'যাচাই করা হচ্ছে...' : `৳ ${finalPrice} BDT পেমেন্ট সাবমিট করুন`}

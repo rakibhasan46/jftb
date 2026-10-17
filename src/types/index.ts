@@ -10,10 +10,18 @@ export interface UserProfile {
   subscriptionExpiresAt?: string | null;
   lastRedeemedPromo?: string | null;
   isSuspended?: boolean;
+  emailVerified?: boolean;
   createdAt: string;
 }
 
-export type ExamSectionType = 'script_vocab' | 'conversation' | 'listening' | 'reading';
+export type ExamSectionType = 'script_vocab' | 'conversation' | 'listening' | 'reading' | string;
+
+export interface TestCategory {
+  id: string;
+  name: string;
+  nameJp?: string;
+  order: number;
+}
 
 export type QuestionType =
   | 'kanji_reading'          // 漢字の読み方
@@ -32,6 +40,7 @@ export interface TestDefinition {
   durationMinutes: number;
   passingScore: number;
   isPublished: boolean;
+  categories?: TestCategory[];
   createdAt: string;
 }
 
@@ -39,6 +48,7 @@ export interface QuestionDefinition {
   id: string;
   testId: string;
   section: ExamSectionType;
+  categoryName?: string;
   questionType?: QuestionType;
   japaneseText: string;
   contextPassage?: string; // Long passage, dialogue, or notice board
@@ -51,6 +61,7 @@ export interface QuestionDefinition {
   audioUrl?: string;
   imageUrl?: string;
   marks: number;
+  order?: number;
 }
 
 export interface SubscriptionPlan {
@@ -128,10 +139,23 @@ export interface SubscriptionRecord {
   createdAt: string;
 }
 
+export interface CategoryScore {
+  categoryId: string;
+  categoryName: string;
+  correctCount: number;
+  totalQuestions: number;
+  marksObtained: number;
+  totalMarks: number;
+  percentage: number;
+}
+
 export interface AttemptRecord {
   id: string;
   testId: string;
+  testTitle?: string;
   userId: string;
+  userName?: string;
+  userEmail?: string;
   startedAt: string;
   submittedAt?: string;
   score: number;
@@ -140,7 +164,20 @@ export interface AttemptRecord {
   rawCorrectCount?: number; // Number of correct questions
   totalQuestions?: number; // Total questions in test
   passed: boolean;
-  sectionScores: Record<ExamSectionType, { correct: number; total: number; marks: number }>;
+  sectionScores: Record<string, { correct: number; total: number; marks: number }>;
+  categoryBreakdown?: CategoryScore[];
   answers: Record<string, number>; // questionId -> selectedOptionIndex
   status: 'in_progress' | 'submitted';
+}
+
+export interface NoticeItem {
+  id: string;
+  title: string;
+  message: string;
+  isPublished: boolean;
+  publishedAt: string;
+  expiresAt?: string | null;
+  priority?: 'normal' | 'important' | 'urgent';
+  createdAt: string;
+  createdBy?: string;
 }

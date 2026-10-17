@@ -63,13 +63,19 @@ service cloud.firestore {
 
     // Subscription Plans collection
     match /subscription_plans/{planId} {
-      allow read: if isSignedIn();
+      allow read: if true;
       allow write: if isAdmin();
     }
 
     // System Settings (e.g. payment_config)
     match /settings/{settingId} {
-      allow read: if isSignedIn();
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Notices and announcements collection
+    match /notices/{noticeId} {
+      allow read: if true;
       allow write: if isAdmin();
     }
 
@@ -106,6 +112,13 @@ service cloud.firestore {
       allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Used transactions collection for duplicate prevention
+    match /used_transactions/{txId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow delete: if isAdmin();
     }
 

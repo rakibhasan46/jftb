@@ -1,10 +1,49 @@
 import React, { useEffect, useState } from 'react';
-import { db } from '../firebase';
-import { collection, getDocs, doc, getDoc, updateDoc, setDoc, query, where, increment } from 'firebase/firestore';
-import { UserProfile, TestDefinition, AttemptRecord, SubscriptionPlan, PromoCode, PromoRedemption, SubscriptionRecord } from '../types';
+import { auth, db } from '../firebase';
+import { sendEmailVerification } from 'firebase/auth';
+import {
+  collection,
+  getDocs,
+  doc,
+  getDoc,
+  updateDoc,
+  setDoc,
+  query,
+  where,
+  increment,
+} from 'firebase/firestore';
+import {
+  UserProfile,
+  TestDefinition,
+  AttemptRecord,
+  SubscriptionPlan,
+  PromoCode,
+  PromoRedemption,
+  SubscriptionRecord,
+  PaymentRecord,
+  NoticeItem,
+} from '../types';
 import { DEFAULT_PLANS } from '../utils/seedData';
 import { PaymentModal } from './PaymentModal';
-import { Sparkles, BookOpen, Clock, Award, CheckCircle, AlertCircle, Play, ChevronRight, Tag, Gift, CreditCard, ShieldAlert } from 'lucide-react';
+import {
+  Sparkles,
+  BookOpen,
+  Clock,
+  Award,
+  CheckCircle,
+  AlertCircle,
+  Play,
+  ChevronRight,
+  Tag,
+  Gift,
+  CreditCard,
+  ShieldAlert,
+  Bell,
+  Mail,
+  RefreshCw,
+  XCircle,
+  CheckCircle2,
+} from 'lucide-react';
 
 interface StudentDashboardProps {
   user: UserProfile;
@@ -19,11 +58,18 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   onViewResult,
   onRefreshUser,
 }) => {
+  const [currentStudent, setCurrentStudent] = useState<UserProfile>(user);
   const [tests, setTests] = useState<TestDefinition[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlan[]>(DEFAULT_PLANS);
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
+  const [userPayments, setUserPayments] = useState<PaymentRecord[]>([]);
+  const [notices, setNotices] = useState<NoticeItem[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Email verification state
+  const [resendingEmail, setResendingEmail] = useState(false);
+  const [verificationSentMsg, setVerificationSentMsg] = useState<string | null>(null);
 
   // Promo code state
   const [promoInput, setPromoInput] = useState('');
@@ -31,8 +77,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   const [promoMessage, setPromoMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [appliedDiscount, setAppliedDiscount] = useState<{ code: string; type: 'percentage' | 'fixed'; value: number } | null>(null);
 
-  // Pending payments check
-  const [hasPendingPayment, setHasPendingPayment] = useState(false);
+  // Keep internal state updated whenever prop user changes
+  useEffect(() => {
+    setCurrentStudent(user);
+  }, [user]);
 
   const fetchData = async () => {
     try {
@@ -67,14 +115,34 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
       });
       setAttempts(attemptList);
 
-      // 4. Check for pending payment requests
+      // 4. Fetch student's payment history
       const payQuery = query(
         collection(db, 'payments'),
-        where('userId', '==', user.uid),
-        where('status', '==', 'pending')
+        where('userId', '==', user.uid)
       );
       const paySnap = await getDocs(payQuery);
-      setHasPendingPayment(!paySnap.empty);
+      const payList: PaymentRecord[] = [];
+      paySnap.forEach((d) => {
+        payList.push(d.data() as PaymentRecord);
+      });
+      // Sort payments descending by date
+      payList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setUserPayments(payList);
+
+      // 5. Fetch published notices
+      const noticeSnap = await getDocs(collection(db, 'notices'));
+      const noticeList: NoticeItem[] = [];
+      const now = new Date();
+      noticeSnap.forEach((d) => {
+        const n = d.data() as NoticeItem;
+        if (n.isPublished) {
+          if (!n.expiresAt || new Date(n.expiresAt) > now) {
+            noticeList.push(n);
+          }
+        }
+      });
+      noticeList.sort((a, b) => new Date(b.publishedAt || b.createdAt).getTime() - new Date(a.publishedAt || a.createdAt).getTime());
+      setNotices(noticeList);
     } catch (err) {
       console.error('Error fetching student data:', err);
     } finally {
@@ -86,10 +154,28 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
     fetchData();
   }, [user.uid]);
 
-  // Check subscription expiry
-  const isSubscribed = user.subscriptionStatus === 'active';
-  const isExpired = user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt) < new Date() : false;
+  // Check subscription expiry with immediate reactivity
+  const isSubscribed = currentStudent.subscriptionStatus === 'active';
+  const isExpired = currentStudent.subscriptionExpiresAt ? new Date(currentStudent.subscriptionExpiresAt) < new Date() : false;
   const hasActiveAccess = isSubscribed && !isExpired;
+
+  const hasPendingPayment = userPayments.some((p) => p.status === 'pending');
+
+  // Handle Resend Verification Email
+  const handleResendVerification = async () => {
+    if (!auth.currentUser) return;
+    setResendingEmail(true);
+    setVerificationSentMsg(null);
+    try {
+      await sendEmailVerification(auth.currentUser);
+      setVerificationSentMsg('ভেরিফিকেশন লিঙ্ক আপনার ইমেইলে পুনরায় পাঠানো হয়েছে। ইনবক্স ও স্প্যাম ফোল্ডার চেক করুন।');
+    } catch (err: any) {
+      console.error('Error sending verification email:', err);
+      setVerificationSentMsg('লিঙ্ক পাঠাতে ব্যর্থ হয়েছে। অনুগ্রহ করে কিছুক্ষণ পর চেষ্টা করুন।');
+    } finally {
+      setResendingEmail(false);
+    }
+  };
 
   // Handle promo code redemption
   const handleRedeemPromo = async (e: React.FormEvent) => {
@@ -177,11 +263,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
         // 5. Construct immediately active user profile
         const activeProfile: UserProfile = {
-          ...user,
+          ...currentStudent,
           subscriptionStatus: 'active',
           subscriptionExpiresAt: newExpiry.toISOString(),
           lastRedeemedPromo: code,
         };
+
+        // Immediately update internal state so UI changes with zero refresh
+        setCurrentStudent(activeProfile);
 
         setPromoMessage({
           type: 'success',
@@ -223,13 +312,77 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-300">
-      {/* Subscription Banner */}
-      <div className={`rounded-2xl p-6 md:p-8 text-white shadow-xl bg-gradient-to-r ${
-        hasActiveAccess
-          ? 'from-emerald-700 via-teal-800 to-slate-900'
-          : 'from-slate-900 via-indigo-950 to-slate-900'
-      }`}>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-6 md:space-y-8 animate-in fade-in duration-300">
+      {/* 1. Active Notices & Announcements */}
+      {notices.length > 0 && (
+        <div className="space-y-2">
+          {notices.map((n) => (
+            <div
+              key={n.id}
+              className={`p-4 rounded-2xl border flex items-start gap-3 shadow-xs transition ${
+                n.priority === 'urgent'
+                  ? 'bg-red-50 border-red-200 text-red-900'
+                  : n.priority === 'important'
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-indigo-50 border-indigo-200 text-indigo-900'
+              }`}
+            >
+              <Bell
+                size={18}
+                className={`shrink-0 mt-0.5 ${
+                  n.priority === 'urgent'
+                    ? 'text-red-600 animate-bounce'
+                    : n.priority === 'important'
+                    ? 'text-amber-600'
+                    : 'text-indigo-600'
+                }`}
+              />
+              <div className="flex-1 space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <h4 className="font-bold text-xs sm:text-sm">{n.title}</h4>
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 rounded uppercase bg-white/70">
+                    {n.priority}
+                  </span>
+                </div>
+                <p className="text-xs leading-relaxed opacity-90">{n.message}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 2. Email Verification Reminder Banner */}
+      {!currentStudent.emailVerified && currentStudent.role !== 'admin' && (
+        <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-amber-900 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5">
+            <Mail size={18} className="text-amber-600 shrink-0" />
+            <div className="text-xs">
+              <span className="font-bold">ইমেইল ভেরিফিকেশন অপেক্ষমাণ:</span> আপনার অ্যাকাউন্টটি সম্পূর্ণ সুরক্ষিত রাখতে ইমেইল যাচাই করুন।
+              {verificationSentMsg && (
+                <div className="text-emerald-700 font-semibold mt-1">{verificationSentMsg}</div>
+              )}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleResendVerification}
+            disabled={resendingEmail}
+            className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shrink-0"
+          >
+            <RefreshCw size={12} className={resendingEmail ? 'animate-spin' : ''} />
+            <span>ভেরিফিকেশন লিঙ্ক পাঠান</span>
+          </button>
+        </div>
+      )}
+
+      {/* 3. Subscription Banner */}
+      <div
+        className={`rounded-3xl p-6 md:p-8 text-white shadow-xl bg-gradient-to-r transition-all duration-300 ${
+          hasActiveAccess
+            ? 'from-emerald-700 via-teal-800 to-slate-900 border border-emerald-500/30'
+            : 'from-slate-900 via-indigo-950 to-slate-900 border border-slate-800'
+        }`}
+      >
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 text-xs font-semibold backdrop-blur-xs border border-white/15">
@@ -237,19 +390,23 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
               <span>JFT-Basic স্টুডেন্ট ড্যাশবোর্ড</span>
             </div>
             <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-              স্বাগতম, {user.displayName || user.email}!
+              স্বাগতম, {currentStudent.displayName || currentStudent.email}!
             </h2>
-            
+
             <div className="text-sm text-slate-200">
               {hasActiveAccess ? (
                 <div className="flex items-center gap-2 text-emerald-300 font-semibold mt-1">
                   <CheckCircle size={16} />
                   <span>
-                    আপনার প্রিমিয়াম সাবস্ক্রিপশন সক্রিয় রয়েছে (মেয়াদ: {user.subscriptionExpiresAt ? new Date(user.subscriptionExpiresAt).toLocaleDateString('bn-BD') : 'আনলিমিটেড'})
+                    আপনার প্রিমিয়াম সাবস্ক্রিপশন সক্রিয় রয়েছে (মেয়াদ:{' '}
+                    {currentStudent.subscriptionExpiresAt
+                      ? new Date(currentStudent.subscriptionExpiresAt).toLocaleDateString('bn-BD')
+                      : 'আনলিমিটেড'}
+                    )
                   </span>
                 </div>
               ) : hasPendingPayment ? (
-                <div className="flex items-center gap-2 text-amber-300 font-semibold mt-1 bg-amber-500/20 p-2 rounded-lg border border-amber-400/30">
+                <div className="flex items-center gap-2 text-amber-300 font-semibold mt-1 bg-amber-500/20 p-2.5 rounded-xl border border-amber-400/30">
                   <Clock size={16} />
                   <span>
                     আপনার একটি পেমেন্ট রিকোয়েস্ট অ্যাডমিন ভেরিফিকেশনে রয়েছে। যাচাই শেষ হলে স্বয়ংক্রিয়ভাবে অ্যাক্সেস পেয়ে যাবেন।
@@ -265,13 +422,13 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
 
           <div className="flex flex-col sm:flex-row items-center gap-2.5 w-full md:w-auto">
             {hasActiveAccess ? (
-              <span className="px-4 py-2 bg-emerald-500/20 text-emerald-300 text-xs font-bold rounded-xl border border-emerald-400/30 flex items-center gap-2">
+              <span className="px-4 py-2.5 bg-emerald-500/20 text-emerald-300 text-xs font-bold rounded-xl border border-emerald-400/30 flex items-center gap-2">
                 <CheckCircle size={15} /> আনলিমিটেড টেস্ট অ্যাক্সেস সক্রিয়
               </span>
             ) : (
               <a
                 href="#plans-section"
-                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-2"
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition flex items-center gap-2 w-full sm:w-auto justify-center"
               >
                 <CreditCard size={15} /> সাবস্ক্রিপশন কিনুন
               </a>
@@ -280,14 +437,14 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       </div>
 
-      {/* Promo Code Box */}
+      {/* 4. Promo Code Box */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Gift className="text-indigo-600" size={20} />
             <h3 className="text-base font-bold text-slate-900">প্রোমো কোড (Promo Code)</h3>
           </div>
-          <span className="text-xs text-slate-500">স্পেশাল ডিসকাউন্ট বা ফ্রি সাবস্ক্রিপশন পান</span>
+          <span className="text-xs text-slate-500 hidden sm:inline">স্পেশাল ডিসকাউন্ট বা ফ্রি সাবস্ক্রিপশন পান</span>
         </div>
 
         <form onSubmit={handleRedeemPromo} className="flex flex-col sm:flex-row gap-3">
@@ -326,10 +483,10 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         )}
       </div>
 
-      {/* Available Tests Section */}
+      {/* 5. Available Tests Section */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+          <h3 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
             <BookOpen className="text-indigo-600" /> উপলব্ধ JFT-Basic মক টেস্টসমূহ
           </h3>
           <span className="text-xs text-slate-500 font-medium">
@@ -406,11 +563,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         )}
       </div>
 
-      {/* Subscription Plans Section */}
+      {/* 6. Subscription Plans Section */}
       <div id="plans-section" className="space-y-4 pt-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <h3 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
               <CreditCard className="text-pink-600" /> সাবস্ক্রিপশন প্যাকেজসমূহ (Subscription Plans)
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">বিকাশ অথবা নগদে সহজে পেমেন্ট করে তাৎক্ষণিক আনলক করুন</p>
@@ -447,9 +604,79 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         </div>
       </div>
 
-      {/* Past Attempts */}
+      {/* 7. Student Payment History */}
+      {userPayments.length > 0 && (
+        <div className="space-y-4 pt-4">
+          <h3 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
+            <CreditCard className="text-indigo-600" /> আপনার পেমেন্ট রিকোয়েস্ট হিস্ট্রি (Payment Requests)
+          </h3>
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
+                    <th className="p-3.5">তারিখ</th>
+                    <th className="p-3.5">মাধ্যম</th>
+                    <th className="p-3.5">TrxID</th>
+                    <th className="p-3.5">পরিমাণ</th>
+                    <th className="p-3.5">স্ট্যাটাস</th>
+                    <th className="p-3.5">মন্তব্য / কারণ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {userPayments.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50/50 transition">
+                      <td className="p-3.5 text-slate-500">
+                        {new Date(p.createdAt).toLocaleDateString('bn-BD')}
+                      </td>
+                      <td className="p-3.5 uppercase font-bold text-[10px]">
+                        <span className={`px-2 py-0.5 rounded ${p.paymentMethod === 'bkash' ? 'bg-pink-100 text-pink-700' : 'bg-orange-100 text-orange-700'}`}>
+                          {p.paymentMethod}
+                        </span>
+                      </td>
+                      <td className="p-3.5 font-mono font-bold text-indigo-700">{p.transactionId}</td>
+                      <td className="p-3.5 font-black text-slate-900">৳ {p.amount}</td>
+                      <td className="p-3.5">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold inline-flex items-center gap-1 ${
+                            p.status === 'approved'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : p.status === 'rejected'
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {p.status === 'approved' && <CheckCircle2 size={12} />}
+                          {p.status === 'rejected' && <XCircle size={12} />}
+                          {p.status === 'pending' && <Clock size={12} />}
+                          {p.status === 'approved'
+                            ? 'অনুমোদিত (Approved)'
+                            : p.status === 'rejected'
+                            ? 'বাতিল (Rejected)'
+                            : 'যাচাই হচ্ছে (Pending)'}
+                        </span>
+                      </td>
+                      <td className="p-3.5 text-slate-500">
+                        {p.rejectionReason ? (
+                          <span className="text-red-600 font-medium">{p.rejectionReason}</span>
+                        ) : p.status === 'approved' ? (
+                          <span className="text-emerald-600 font-medium">সাবস্ক্রিপশন চালু হয়েছে</span>
+                        ) : (
+                          'অ্যাডমিন দ্রুত ভেরিফাই করবেন'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. Past Exam Attempts */}
       <div className="space-y-4 pt-4">
-        <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+        <h3 className="text-lg md:text-xl font-bold text-slate-900 flex items-center gap-2">
           <Award className="text-indigo-600" /> পরীক্ষার ফলাফল ও ইতিহাস (Past Results)
         </h3>
 
@@ -460,9 +687,9 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
         ) : (
           <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
             <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600 uppercase">
+                  <tr className="bg-slate-50 border-b border-slate-200 font-semibold text-slate-600 uppercase">
                     <th className="p-4">তারিখ</th>
                     <th className="p-4">স্কোর</th>
                     <th className="p-4">স্ট্যাটাস</th>
@@ -516,7 +743,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({
           isOpen={!!selectedPlan}
           onClose={() => setSelectedPlan(null)}
           plan={selectedPlan}
-          user={user}
+          user={currentStudent}
           appliedDiscount={appliedDiscount}
           onPaymentSubmitted={() => {
             fetchData();

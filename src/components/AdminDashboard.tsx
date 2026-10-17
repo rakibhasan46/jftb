@@ -10,6 +10,7 @@ import {
   getDoc,
   query,
   orderBy,
+  where,
 } from 'firebase/firestore';
 import {
   UserProfile,
@@ -22,9 +23,14 @@ import {
   PromoRedemption,
   PaymentConfig,
   SubscriptionRecord,
+  NoticeItem,
+  TestCategory,
+  AttemptRecord,
+  CategoryScore,
 } from '../types';
 import { seedDefaultTestData, DEFAULT_PLANS, DEFAULT_PAYMENT_CONFIG } from '../utils/seedData';
 import { JapaneseTextRenderer } from './JapaneseTextRenderer';
+import { toBengaliNumber, DEFAULT_TEST_CATEGORIES } from './ExamInterface';
 import {
   Shield,
   Users,
@@ -49,6 +55,15 @@ import {
   Ban,
   UserCheck,
   Search,
+  Bell,
+  Copy,
+  Award,
+  Printer,
+  Download,
+  ChevronUp,
+  ChevronDown,
+  ListFilter,
+  Calendar,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -63,22 +78,42 @@ const AUDIO_PRESETS = [
 ];
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'questions' | 'plans' | 'payments' | 'promos' | 'students'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tests' | 'questions' | 'results' | 'plans' | 'payments' | 'promos' | 'students' | 'notices'>('overview');
   
   // Data lists
   const [tests, setTests] = useState<TestDefinition[]>([]);
   const [questions, setQuestions] = useState<QuestionDefinition[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [students, setStudents] = useState<UserProfile[]>([]);
+  const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [promos, setPromos] = useState<PromoCode[]>([]);
   const [redemptions, setRedemptions] = useState<PromoRedemption[]>([]);
+  const [notices, setNotices] = useState<NoticeItem[]>([]);
   const [paymentConfig, setPaymentConfig] = useState<PaymentConfig>(DEFAULT_PAYMENT_CONFIG);
   const [selectedTestId, setSelectedTestId] = useState<string>('');
   const [loading, setLoading] = useState(true);
 
   // Search in students
   const [studentSearch, setStudentSearch] = useState('');
+
+  // Result Panel State
+  const [resultSearch, setResultSearch] = useState('');
+  const [resultFilter, setResultFilter] = useState<'all' | 'passed' | 'failed'>('all');
+  const [expandedAttemptId, setExpandedAttemptId] = useState<string | null>(null);
+
+  // Dynamic Category Management State
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatNameJp, setNewCatNameJp] = useState('');
+  const [editingCatId, setEditingCatId] = useState<string | null>(null);
+  const [editingCatName, setEditingCatName] = useState('');
+  const [showCatManager, setShowCatManager] = useState(false);
+
+  // New Notice state
+  const [noticeTitle, setNoticeTitle] = useState('');
+  const [noticeMessage, setNoticeMessage] = useState('');
+  const [noticePriority, setNoticePriority] = useState<'normal' | 'important' | 'urgent'>('normal');
+  const [noticeDaysValid, setNoticeDaysValid] = useState(14);
 
   // New Test form state
   const [newTestTitle, setNewTestTitle] = useState('');
@@ -185,10 +220,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         setConfigNagadType(DEFAULT_PAYMENT_CONFIG.nagadType);
         setConfigInstructions(DEFAULT_PAYMENT_CONFIG.instructionsBengali);
       }
+
+      // 7. Fetch Notices
+      const noticeSnap = await getDocs(collection(db, 'notices'));
+      const noticeList: NoticeItem[] = [];
+      noticeSnap.forEach((d) => noticeList.push(d.data() as NoticeItem));
+      noticeList.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setNotices(noticeList);
+
+      // 8. Fetch Exam Attempts
+      const attemptsSnap = await getDocs(collection(db, 'attempts'));
+      const attemptList: AttemptRecord[] = [];
+      attemptsSnap.forEach((d) => attemptList.push(d.data() as AttemptRecord));
+      attemptList.sort((a, b) => new Date(b.submittedAt || b.startedAt).getTime() - new Date(a.submittedAt || a.startedAt).getTime());
+      setAttempts(attemptList);
     } catch (err) {
       console.error('Error fetching admin data:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Notice Actions
+  const handleCreateNotice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noticeTitle.trim() || !noticeMessage.trim()) {
+      alert('নোটিশের শিরোনাম ও বার্তা পূরণ করুন।');
+      return;
+    }
+    try {
+      const nId = 'notice_' + Date.now();
+      const now = new Date();
+      const expires = Number(noticeDaysValid) > 0 ? new Date(Date.now() + Number(noticeDaysValid) * 24 * 60 * 60 * 1000).toISOString() : null;
+      const notice: NoticeItem = {
+        id: nId,
+        title: noticeTitle.trim(),
+        message: noticeMessage.trim(),
+        isPublished: true,
+        priority: noticePriority,
+        publishedAt: now.toISOString(),
+        expiresAt: expires,
+        createdAt: now.toISOString(),
+        createdBy: currentUser.email,
+      };
+      await setDoc(doc(db, 'notices', nId), notice);
+      setNoticeTitle('');
+      setNoticeMessage('');
+      fetchAllData();
+      alert('নতুন নোটিশ সফলভাবে প্রকাশ করা হয়েছে!');
+    } catch (err: any) {
+      console.error('Error creating notice:', err);
+      alert('নোটিশ তৈরিতে সমস্যা হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleToggleNotice = async (notice: NoticeItem) => {
+    try {
+      await updateDoc(doc(db, 'notices', notice.id), { isPublished: !notice.isPublished });
+      fetchAllData();
+    } catch (err) {
+      console.error('Error toggling notice:', err);
+    }
+  };
+
+  const handleDeleteNotice = async (noticeId: string) => {
+    if (!confirm('আপনি কি এই নোটিশটি মুছে ফেলতে চান?')) return;
+    try {
+      await deleteDoc(doc(db, 'notices', noticeId));
+      fetchAllData();
+    } catch (err) {
+      console.error('Error deleting notice:', err);
     }
   };
 
@@ -221,6 +322,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         durationMinutes: Number(newTestDuration),
         passingScore: Number(newTestPassing),
         isPublished: true,
+        categories: DEFAULT_TEST_CATEGORIES,
         createdAt: new Date().toISOString(),
       };
       await setDoc(doc(db, 'tests', id), test);
@@ -252,6 +354,121 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     }
   };
 
+  // Category Actions (Dynamic categories for tests)
+  const handleAddCategory = async (testId: string) => {
+    if (!newCatName.trim()) {
+      alert('দয়া করে ক্যাটাগরির নাম লিখুন।');
+      return;
+    }
+    const currentTest = tests.find((t) => t.id === testId);
+    if (!currentTest) return;
+    const cats = currentTest.categories && currentTest.categories.length > 0
+      ? [...currentTest.categories]
+      : [...DEFAULT_TEST_CATEGORIES];
+
+    const newCatId = 'cat_' + Date.now();
+    const newCategory: TestCategory = {
+      id: newCatId,
+      name: newCatName.trim(),
+      nameJp: newCatNameJp.trim() || undefined,
+      order: cats.length + 1,
+    };
+    cats.push(newCategory);
+
+    try {
+      await updateDoc(doc(db, 'tests', testId), { categories: cats });
+      setTests((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, categories: cats } : t))
+      );
+      setNewCatName('');
+      setNewCatNameJp('');
+      alert('নতুন ক্যাটাগরি সফলভাবে যুক্ত হয়েছে!');
+    } catch (err: any) {
+      console.error('Error adding category:', err);
+      alert('ক্যাটাগরি যুক্ত করতে ব্যর্থ হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleUpdateCategory = async (testId: string, catId: string) => {
+    if (!editingCatName.trim()) return;
+    const currentTest = tests.find((t) => t.id === testId);
+    if (!currentTest) return;
+    const cats = (currentTest.categories || DEFAULT_TEST_CATEGORIES).map((c) =>
+      c.id === catId ? { ...c, name: editingCatName.trim() } : c
+    );
+
+    try {
+      await updateDoc(doc(db, 'tests', testId), { categories: cats });
+      setTests((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, categories: cats } : t))
+      );
+      setEditingCatId(null);
+      setEditingCatName('');
+      alert('ক্যাটাগরির নাম সফলভাবে পরিবর্তন করা হয়েছে!');
+    } catch (err: any) {
+      console.error('Error updating category:', err);
+      alert('ক্যাটাগরি আপডেট করতে ব্যর্থ হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleDeleteCategory = async (testId: string, catId: string) => {
+    const questionsInCat = questions.filter((q) => q.section === catId);
+    if (questionsInCat.length > 0) {
+      if (!confirm(`এই ক্যাটাগরিতে ${questionsInCat.length}টি প্রশ্ন রয়েছে। আপনি কি নিশ্চিত যে ক্যাটাগরিটি মুছে ফেলবেন?`)) {
+        return;
+      }
+    } else {
+      if (!confirm('আপনি কি এই ক্যাটাগরিটি মুছে ফেলতে চান?')) return;
+    }
+
+    const currentTest = tests.find((t) => t.id === testId);
+    if (!currentTest) return;
+    const cats = (currentTest.categories || DEFAULT_TEST_CATEGORIES).filter((c) => c.id !== catId);
+    // Re-assign orders
+    cats.forEach((c, i) => {
+      c.order = i + 1;
+    });
+
+    try {
+      await updateDoc(doc(db, 'tests', testId), { categories: cats });
+      setTests((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, categories: cats } : t))
+      );
+      alert('ক্যাটাগরি সফলভাবে মুছে ফেলা হয়েছে!');
+    } catch (err: any) {
+      console.error('Error deleting category:', err);
+      alert('ক্যাটাগরি মুছতে ব্যর্থ হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
+  const handleReorderCategory = async (testId: string, catId: string, direction: 'up' | 'down') => {
+    const currentTest = tests.find((t) => t.id === testId);
+    if (!currentTest) return;
+    const cats = [...(currentTest.categories || DEFAULT_TEST_CATEGORIES)].sort((a, b) => a.order - b.order);
+    const idx = cats.findIndex((c) => c.id === catId);
+    if (idx === -1) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === cats.length - 1) return;
+
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const temp = cats[idx];
+    cats[idx] = cats[targetIdx];
+    cats[targetIdx] = temp;
+
+    cats.forEach((c, i) => {
+      c.order = i + 1;
+    });
+
+    try {
+      await updateDoc(doc(db, 'tests', testId), { categories: cats });
+      setTests((prev) =>
+        prev.map((t) => (t.id === testId ? { ...t, categories: cats } : t))
+      );
+    } catch (err: any) {
+      console.error('Error reordering category:', err);
+    }
+  };
+
   // Question Actions
   const handleSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -261,11 +478,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     }
 
     try {
+      const activeTest = tests.find((t) => t.id === selectedTestId);
+      const testCats = activeTest?.categories || DEFAULT_TEST_CATEGORIES;
+      const catObj = testCats.find((c) => c.id === qSection);
+
       const qId = editingQuestionId || 'q_' + Date.now();
       const question: QuestionDefinition = {
         id: qId,
         testId: selectedTestId,
         section: qSection,
+        categoryName: catObj?.name,
         questionType: qQuestionType as any,
         japaneseText: qJapaneseText,
         contextPassage: qContextPassage.trim() || undefined,
@@ -351,6 +573,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     }
   };
 
+  const handleDuplicateQuestion = async (q: QuestionDefinition) => {
+    if (!selectedTestId) return;
+    try {
+      const newQId = 'q_' + Date.now();
+      const duplicate: QuestionDefinition = {
+        ...q,
+        id: newQId,
+        testId: selectedTestId,
+        japaneseText: q.japaneseText,
+      };
+      await setDoc(doc(db, 'tests', selectedTestId, 'questions', newQId), duplicate);
+      setQuestions((prev) => [...prev, duplicate]);
+      alert('প্রশ্নটি সফলভাবে কপি / ডুপ্লিকেট করা হয়েছে!');
+    } catch (err: any) {
+      console.error('Error duplicating question:', err);
+      alert('প্রশ্ন ডুপ্লিকেট করতে ব্যর্থ হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
   // Plan Actions
   const handleCreatePlan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -414,16 +655,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
     try {
       const now = new Date();
-      const expiry = new Date(Date.now() + promoDaysValid * 24 * 60 * 60 * 1000);
+      const days = Number(promoDaysValid) || 30;
+      const expiry = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 
-      const promo: PromoCode = {
+      const promoData: Record<string, any> = {
         id: cleanCode,
         code: cleanCode,
         benefitType: promoBenefitType,
-        freeDurationDays: promoBenefitType === 'free_access' ? Number(promoFreeDays) : undefined,
-        discountType: promoBenefitType === 'discount' ? promoDiscountType : undefined,
-        discountValue: promoBenefitType === 'discount' ? Number(promoDiscountVal) : undefined,
-        maxRedemptions: Number(promoMaxUses),
+        maxRedemptions: Number(promoMaxUses) || 100,
         usedCount: 0,
         startDate: now.toISOString(),
         expiryDate: expiry.toISOString(),
@@ -431,12 +670,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         createdAt: now.toISOString(),
       };
 
-      await setDoc(doc(db, 'promo_codes', cleanCode), promo);
+      if (promoBenefitType === 'free_access') {
+        promoData.freeDurationDays = Number(promoFreeDays) || 7;
+      } else {
+        promoData.discountType = promoDiscountType || 'percentage';
+        promoData.discountValue = Number(promoDiscountVal) || 10;
+      }
+
+      await setDoc(doc(db, 'promo_codes', cleanCode), promoData);
       setPromoCodeInput('');
       fetchAllData();
       alert(`প্রোমো কোড "${cleanCode}" সফলভাবে তৈরি হয়েছে!`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error creating promo:', err);
+      alert('প্রোমো কোড তৈরিতে সমস্যা হয়েছে: ' + (err.message || String(err)));
     }
   };
 
@@ -585,6 +832,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
     }
   };
 
+  const handleSeedDefaults = async () => {
+    if (!confirm('ডিফল্ট জেএফটি-বেসিক প্রশ্ন, প্ল্যান এবং প্রোমো কোড ডেটাবেজে লোড করতে চান?')) return;
+    try {
+      await seedDefaultTestData(true);
+      await fetchAllData();
+      alert('ডিফল্ট ডেটা সফলভাবে প্রস্তুত করা হয়েছে!');
+    } catch (err: any) {
+      alert('সিড করতে সমস্যা হয়েছে: ' + (err.message || String(err)));
+    }
+  };
+
   const pendingPayments = payments.filter((p) => p.status === 'pending');
   const filteredStudents = students.filter(
     (s) =>
@@ -608,12 +866,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           </p>
         </div>
 
-        <button
-          onClick={fetchAllData}
-          className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-md"
-        >
-          {loading ? 'লোড হচ্ছে...' : 'ডাটা রিফ্রেশ করুন'}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSeedDefaults}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-xs rounded-xl transition border border-indigo-500/30 shadow-md flex items-center gap-1.5"
+            title="পরীক্ষার ডিফল্ট প্রশ্ন, প্ল্যান এবং প্রোমো কোড লোড বা রিস্টোর করুন"
+          >
+            <Sparkles size={14} /> ডিফল্ট প্রশ্ন ও ডাটা সিড
+          </button>
+          <button
+            onClick={fetchAllData}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition shadow-md"
+          >
+            {loading ? 'লোড হচ্ছে...' : 'ডাটা রিফ্রেশ করুন'}
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -678,6 +945,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
           }`}
         >
           শিক্ষার্থী তালিকা ({students.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('results')}
+          className={`pb-3 transition border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
+            activeTab === 'results' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Award size={15} className="text-amber-500" />
+          <span>পরীক্ষার ফলাফল ({attempts.length})</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('notices')}
+          className={`pb-3 transition border-b-2 whitespace-nowrap flex items-center gap-1.5 ${
+            activeTab === 'notices' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Bell size={14} />
+          <span>নোটিশ ও ঘোষণা ({notices.length})</span>
         </button>
       </div>
 
@@ -756,46 +1041,155 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
 
           <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
             <h3 className="text-base font-bold text-slate-900">বিদ্যমান মক টেস্টসমূহ ({tests.length})</h3>
-            <div className="space-y-3">
-              {tests.map((test) => (
-                <div key={test.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-bold text-slate-900">{test.title}</h4>
-                      <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${test.isPublished ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
-                        {test.isPublished ? 'প্রকাশিত (Published)' : 'ড্রাফট (Unpublished)'}
-                      </span>
+            <div className="space-y-4">
+              {tests.map((test) => {
+                const testCats = test.categories && test.categories.length > 0 ? test.categories : DEFAULT_TEST_CATEGORIES;
+                return (
+                  <div key={test.id} className="p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-slate-900 text-base">{test.title}</h4>
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${test.isPublished ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'}`}>
+                            {test.isPublished ? 'প্রকাশিত (Published)' : 'ড্রাফট (Unpublished)'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mt-0.5">{test.description} ({test.durationMinutes} মিনিট | পাস মার্ক: {test.passingScore})</p>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          onClick={() => handleTogglePublish(test)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                            test.isPublished ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                          }`}
+                        >
+                          {test.isPublished ? 'আনপাবলিশ' : 'পাবলিশ করুন'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedTestId(test.id);
+                            setActiveTab('questions');
+                          }}
+                          className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition"
+                        >
+                          প্রশ্ন ম্যানেজ ({questions.filter(q => q.testId === test.id).length})
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTest(test.id)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 rounded-xl hover:bg-red-50 transition"
+                          title="টেস্ট মুছুন"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-500 mt-0.5">{test.description} ({test.durationMinutes} মিনিট)</p>
+
+                    {/* DYNAMIC CATEGORY MANAGER FOR THIS TEST */}
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                        <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                          <span>📂</span>
+                          <span>এই টেস্টের ক্যাটাগরি তালিকা ({testCats.length}টি) - ইচ্ছামতো যোগ বা পরিবর্তন করুন</span>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                        {testCats.map((cat, cIdx) => (
+                          <div key={cat.id} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="text-[10px] font-bold text-indigo-600">ক্যাটাগরি {toBengaliNumber(cIdx + 1)}</div>
+                              {editingCatId === cat.id ? (
+                                <div className="flex items-center gap-1 mt-1">
+                                  <input
+                                    type="text"
+                                    value={editingCatName}
+                                    onChange={(e) => setEditingCatName(e.target.value)}
+                                    className="px-2 py-1 bg-white border border-slate-300 rounded text-xs w-full"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateCategory(test.id, cat.id)}
+                                    className="px-2 py-1 bg-emerald-600 text-white rounded text-[10px] font-bold"
+                                  >
+                                    সেভ
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="text-xs font-bold text-slate-800 truncate" title={cat.name}>
+                                  {cat.name}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {editingCatId !== cat.id && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingCatId(cat.id);
+                                    setEditingCatName(cat.name);
+                                  }}
+                                  className="p-1 text-slate-500 hover:text-indigo-600"
+                                  title="নাম পরিবর্তন"
+                                >
+                                  <Edit size={13} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleReorderCategory(test.id, cat.id, 'up')}
+                                className="p-1 text-slate-400 hover:text-slate-700"
+                                title="উপরে নিন"
+                              >
+                                <ChevronUp size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleReorderCategory(test.id, cat.id, 'down')}
+                                className="p-1 text-slate-400 hover:text-slate-700"
+                                title="নিচে নিন"
+                              >
+                                <ChevronDown size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCategory(test.id, cat.id)}
+                                className="p-1 text-slate-400 hover:text-red-600"
+                                title="ক্যাটাগরি মুছুন"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Add Category Form */}
+                      <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          value={selectedTestId === test.id ? newCatName : ''}
+                          onChange={(e) => {
+                            setSelectedTestId(test.id);
+                            setNewCatName(e.target.value);
+                          }}
+                          placeholder="নতুন ক্যাটাগরির নাম লিখুন (যেমন: ৫. অতিরিক্ত শব্দভাণ্ডার)"
+                          className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAddCategory(test.id)}
+                          className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition flex items-center justify-center gap-1 shrink-0"
+                        >
+                          <Plus size={14} />
+                          <span>ক্যাটাগরি যোগ করুন</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleTogglePublish(test)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                        test.isPublished ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' : 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
-                      }`}
-                    >
-                      {test.isPublished ? 'আনপাবলিশ' : 'পাবলিশ করুন'}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSelectedTestId(test.id);
-                        setActiveTab('questions');
-                      }}
-                      className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition"
-                    >
-                      প্রশ্ন ম্যানেজ
-                    </button>
-                    <button
-                      onClick={() => handleDeleteTest(test.id)}
-                      className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition"
-                      title="টেস্ট মুছুন"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>
@@ -837,16 +1231,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
             <form onSubmit={handleSaveQuestion} className="space-y-4 pt-2">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">অফিসিয়াল সেকশন</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">ক্যাটাগরি নির্বাচন করুন</label>
                   <select
                     value={qSection}
                     onChange={(e) => setQSection(e.target.value as ExamSectionType)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                   >
-                    <option value="script_vocab">সেকশন 1: 文字と語彙 (Script & Vocabulary)</option>
-                    <option value="conversation">সেকশন 2: 会話と表現 (Conversation & Expression)</option>
-                    <option value="listening">সেকশন 3: 聴解 (Listening Comprehension)</option>
-                    <option value="reading">সেকশন 4: 読解 (Reading Comprehension)</option>
+                    {(() => {
+                      const activeT = tests.find((t) => t.id === selectedTestId);
+                      const tCats = activeT?.categories && activeT.categories.length > 0 ? activeT.categories : DEFAULT_TEST_CATEGORIES;
+                      return tCats.map((cat) => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ));
+                    })()}
                   </select>
                 </div>
 
@@ -979,6 +1376,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                     placeholder="https://... অডিও ফাইল লিঙ্ক"
                     className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono"
                   />
+                  {qAudioUrl && (
+                    <div className="mt-1.5 p-1.5 bg-slate-900 rounded-lg">
+                      <div className="text-[10px] text-slate-300 font-bold mb-1">অডিও প্রিভিউ:</div>
+                      <audio controls src={qAudioUrl} className="w-full h-7" />
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -990,6 +1393,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                     placeholder="https://... ডায়াগ্রাম বা সাইনবোর্ড"
                     className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono"
                   />
+                  {qImageUrl && (
+                    <div className="mt-1.5 p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-center">
+                      <img
+                        src={qImageUrl}
+                        alt="Image Preview"
+                        className="max-h-24 mx-auto rounded object-contain border"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1161,6 +1576,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                       <span className="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold">
                         সঠিক: {q.correctAnswer + 1}
                       </span>
+                      <button
+                        onClick={() => handleDuplicateQuestion(q)}
+                        className="p-1.5 text-slate-500 hover:text-emerald-600 rounded-lg hover:bg-emerald-50 transition"
+                        title="প্রশ্ন ডুপ্লিকেট / কপি করুন (Duplicate)"
+                      >
+                        <Copy size={16} />
+                      </button>
                       <button
                         onClick={() => handleStartEditQuestion(q)}
                         className="p-1.5 text-slate-500 hover:text-indigo-600 rounded-lg hover:bg-indigo-50 transition"
@@ -1621,6 +2043,159 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
         </div>
       )}
 
+      {/* TAB: RESULTS & PDF DOWNLOAD */}
+      {activeTab === 'results' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Award className="text-amber-500" /> শিক্ষার্থীদের পরীক্ষার ফলাফল ও ক্যাটাগরিভিত্তিক স্কোর ({attempts.length})
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  অ্যাডমিন এখান থেকে যেকোনো শিক্ষার্থীর ক্যাটাগরিভিত্তিক সঠিক উত্তর ও প্রাপ্ত নম্বর দেখতে এবং প্রফেশনাল PDF রিপোর্ট ডাউনলোড করতে পারবেন।
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="relative w-full sm:w-64">
+                  <Search size={14} className="absolute left-3 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    value={resultSearch}
+                    onChange={(e) => setResultSearch(e.target.value)}
+                    placeholder="শিক্ষার্থীর নাম বা ইমেইল দিয়ে খুঁজুন..."
+                    className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  />
+                </div>
+                <select
+                  value={resultFilter}
+                  onChange={(e) => setResultFilter(e.target.value as any)}
+                  className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                >
+                  <option value="all">সকল ফলাফল</option>
+                  <option value="passed">উত্তীর্ণ (Passed)</option>
+                  <option value="failed">অকৃতকার্য (Failed)</option>
+                </select>
+              </div>
+            </div>
+
+            {attempts.length === 0 ? (
+              <div className="text-center py-12 text-slate-400 text-xs">
+                এখনো কোনো শিক্ষার্থী পরীক্ষা সম্পন্ন করেনি।
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {attempts
+                  .filter((att) => {
+                    const matchSearch =
+                      (att.userName && att.userName.toLowerCase().includes(resultSearch.toLowerCase())) ||
+                      (att.userEmail && att.userEmail.toLowerCase().includes(resultSearch.toLowerCase())) ||
+                      (att.testTitle && att.testTitle.toLowerCase().includes(resultSearch.toLowerCase()));
+                    const matchFilter =
+                      resultFilter === 'all' ||
+                      (resultFilter === 'passed' && att.passed) ||
+                      (resultFilter === 'failed' && !att.passed);
+                    return matchSearch && matchFilter;
+                  })
+                  .map((att) => {
+                    const studentObj = students.find((s) => s.uid === att.userId);
+                    const testObj = tests.find((t) => t.id === att.testId);
+                    const isExpanded = expandedAttemptId === att.id;
+                    const pct = att.totalMarks > 0 ? Math.round((att.score / att.totalMarks) * 100) : 0;
+
+                    return (
+                      <div
+                        key={att.id}
+                        className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4 transition hover:border-slate-300"
+                      >
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                                  att.passed ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'
+                                }`}
+                              >
+                                {att.passed ? 'উত্তীর্ণ (Passed)' : 'অকৃতকার্য (Failed)'}
+                              </span>
+                              <span className="text-xs text-slate-500">
+                                {new Date(att.submittedAt || att.startedAt).toLocaleString('bn-BD')}
+                              </span>
+                            </div>
+                            <h4 className="text-base font-bold text-slate-900">
+                              {att.userName || studentObj?.displayName || att.userEmail}
+                            </h4>
+                            <div className="text-xs text-slate-500">
+                              ইমেইল: <span className="font-mono text-slate-700">{att.userEmail}</span> | টেস্ট: <strong className="text-slate-800">{att.testTitle || testObj?.title || 'JFT-Basic Test'}</strong>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-4">
+                            <div className="text-right">
+                              <div className="text-[11px] text-slate-500 font-semibold">প্রাপ্ত নম্বর / মোট:</div>
+                              <div className="text-lg font-black text-indigo-600">
+                                {att.score} / {att.totalMarks} <span className="text-xs text-slate-600">({pct}%)</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedAttemptId(isExpanded ? null : att.id)}
+                                className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition cursor-pointer shadow-xs"
+                              >
+                                {isExpanded ? 'ক্যাটাগরি লুকান' : 'ক্যাটাগরি বিস্তারিত'}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Expanded Category Breakdown */}
+                        {isExpanded && (
+                          <div className="pt-3 border-t border-slate-200 space-y-3 animate-in fade-in">
+                            <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <span>📊</span>
+                              <span>ক্যাটাগরিভিত্তিক সঠিক উত্তর ও প্রাপ্ত নম্বর (Category Breakdown):</span>
+                            </h5>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                              {(att.categoryBreakdown || []).map((cat) => (
+                                <div key={cat.categoryId} className="bg-white p-3.5 rounded-xl border border-slate-200 space-y-1.5">
+                                  <div className="text-xs font-bold text-slate-800 truncate" title={cat.categoryName}>
+                                    {cat.categoryName}
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-slate-500">সঠিক উত্তর:</span>
+                                    <strong className="text-emerald-700">{cat.correctCount} / {cat.totalQuestions} টি</strong>
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-slate-500">নম্বর:</span>
+                                    <strong className="text-slate-900">{cat.marksObtained} / {cat.totalMarks}</strong>
+                                  </div>
+                                  <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full ${cat.percentage >= 60 ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                                      style={{ width: `${Math.min(100, Math.max(0, cat.percentage))}%` }}
+                                    ></div>
+                                  </div>
+                                  <div className="text-right text-[10px] font-bold text-slate-500">
+                                    {cat.percentage}%
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* TAB 7: STUDENTS MANAGEMENT */}
       {activeTab === 'students' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
@@ -1707,6 +2282,150 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ currentUser }) =
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 8: NOTICES & ANNOUNCEMENTS */}
+      {activeTab === 'notices' && (
+        <div className="space-y-6">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
+            <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <Bell className="text-indigo-600" size={18} /> নতুন নোটিশ ও ঘোষণা প্রকাশ করুন
+            </h3>
+            <form onSubmit={handleCreateNotice} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">নোটিশের শিরোনাম *</label>
+                  <input
+                    type="text"
+                    required
+                    value={noticeTitle}
+                    onChange={(e) => setNoticeTitle(e.target.value)}
+                    placeholder="যেমন: আগামী শুক্রবারের বিশেষ মক টেস্টের সময়সূচি"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">গুরুত্ব (Priority)</label>
+                  <select
+                    value={noticePriority}
+                    onChange={(e) => setNoticePriority(e.target.value as any)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
+                  >
+                    <option value="normal">সাধারণ (Normal)</option>
+                    <option value="important">গুরুত্বপূর্ণ (Important)</option>
+                    <option value="urgent">জরুরি (Urgent)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">নোটিশের বিস্তারিত বার্তা *</label>
+                <textarea
+                  required
+                  rows={3}
+                  value={noticeMessage}
+                  onChange={(e) => setNoticeMessage(e.target.value)}
+                  placeholder="শিক্ষার্থীদের জন্য বিস্তারিত নির্দেশনা বা নোটিশ বার্তা লিখুন..."
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs leading-relaxed"
+                ></textarea>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">মেয়াদ (দিন) - ০ দিলে কোনো মেয়াদ শেষ হবে না</label>
+                  <input
+                    type="number"
+                    value={noticeDaysValid}
+                    onChange={(e) => setNoticeDaysValid(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition"
+              >
+                নোটিশ প্রকাশ করুন
+              </button>
+            </form>
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-xs">
+            <h3 className="text-base font-bold text-slate-900">প্রকাশিত ও খসড়া নোটিশ তালিকা ({notices.length})</h3>
+            {notices.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-xs">কোনো নোটিশ এখনো যুক্ত করা হয়নি।</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase">
+                      <th className="p-3">তারিখ</th>
+                      <th className="p-3">শিরোনাম ও বার্তা</th>
+                      <th className="p-3">গুরুত্ব</th>
+                      <th className="p-3">মেয়াদ শেষ</th>
+                      <th className="p-3">স্ট্যাটাস</th>
+                      <th className="p-3 text-right">পদক্ষেপ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {notices.map((n) => (
+                      <tr key={n.id} className="hover:bg-slate-50/50">
+                        <td className="p-3 text-slate-500 whitespace-nowrap">
+                          {new Date(n.publishedAt || n.createdAt).toLocaleDateString('bn-BD')}
+                        </td>
+                        <td className="p-3 max-w-md">
+                          <div className="font-bold text-slate-900">{n.title}</div>
+                          <p className="text-[11px] text-slate-600 line-clamp-2 mt-0.5">{n.message}</p>
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              n.priority === 'urgent'
+                                ? 'bg-red-100 text-red-800'
+                                : n.priority === 'important'
+                                ? 'bg-amber-100 text-amber-800'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}
+                          >
+                            {n.priority}
+                          </span>
+                        </td>
+                        <td className="p-3 text-slate-500 whitespace-nowrap">
+                          {n.expiresAt ? new Date(n.expiresAt).toLocaleDateString('bn-BD') : 'মেয়াদহীন'}
+                        </td>
+                        <td className="p-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              n.isPublished ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {n.isPublished ? 'প্রকাশিত' : 'অপ্রকাশিত'}
+                          </span>
+                        </td>
+                        <td className="p-3 text-right space-x-2 whitespace-nowrap">
+                          <button
+                            onClick={() => handleToggleNotice(n)}
+                            className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-bold"
+                          >
+                            {n.isPublished ? 'আনপাবলিশ' : 'পাবলিশ'}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteNotice(n.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                            title="মুছুন"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

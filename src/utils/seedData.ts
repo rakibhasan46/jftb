@@ -31,7 +31,10 @@ export const DEFAULT_PAYMENT_CONFIG: PaymentConfig = {
   instructionsBengali: 'বিকাশ বা নগদ অ্যাপ থেকে "Send Money" করুন। এরপর আপনার TrxID এবং প্রেরক নম্বর নিচে দিয়ে সাবমিট করুন। অ্যাডমিন ভেরিফাই করে সাবস্ক্রিপশন চালু করবেন।',
 };
 
-export async function seedDefaultTestData() {
+export async function seedDefaultTestData(isAdminUser?: boolean) {
+  if (!isAdminUser) {
+    return;
+  }
   try {
     // 1. Seed Payment Config if not present
     const paymentDocRef = doc(db, 'settings', 'payment_config');
